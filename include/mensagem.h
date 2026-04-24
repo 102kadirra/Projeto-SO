@@ -13,7 +13,8 @@ typedef enum {
     SUBMIT, 
     OK,
     EXECUTADO,
-    SHUTDOWN
+    CONSULTA,
+    SHUTDOWN, 
 } TipoMensagem;
 
 typedef struct Mensagem {

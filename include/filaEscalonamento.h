@@ -3,7 +3,7 @@
 
 #include "comando.h"
 
-typedef GCompareFunc PoliticaEscalonamento;
+typedef GCompareDataFunc PoliticaEscalonamento;
 
 typedef struct {
     GQueue* fila;

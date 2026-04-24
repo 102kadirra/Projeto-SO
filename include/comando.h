@@ -17,19 +17,13 @@ typedef struct Comando {
     int user_id;
     int command_id;
     char command[256];
-    struct timeval tempo_entrada
+    char runner_FIFO[256];
+    struct timeval tempo_entrada;
 } Comando;
 
-Comando *criar_comando(int user_id, int command_id, const char *command_str);
+Comando *criar_comando(int user_id, int command_id, const char *command_str, const char *runner_fifo);
 void libertar_comando(Comando *cmd);
 double duracao_execucao (const Comando *c, struct timeval *fim);
 
-/*
-typedef struct Pedido {
-    ModoUtilizacao modo;
-    Comando dados;
-    pid_t runner_pid; 
-} Pedido;
-*/
 #endif 
 
