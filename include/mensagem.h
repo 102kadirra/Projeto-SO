@@ -8,6 +8,7 @@
 #include "comando.h"
 
 #define MAX_FIFO_NAME 256
+#define FIFO_RUNNER_TO_CONTROLLER "fifos/runnerToController"
 
 typedef enum {
     SUBMIT, 

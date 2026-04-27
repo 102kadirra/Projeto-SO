@@ -5,17 +5,10 @@
 #include <string.h>
 #include <sys/time.h>
 
-
-typedef enum {
-    INVALIDO = -1,
-    EXECUTAR = 0,
-    CONSULTAR = 1,
-    TERMINAR = 2
-} ModoUtilizacao;
-
 typedef struct Comando {
     int user_id;
     int command_id;
+    int turno;
     char command[256];
     char runner_FIFO[256];
     struct timeval tempo_entrada;

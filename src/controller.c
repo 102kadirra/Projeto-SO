@@ -5,86 +5,122 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include "../include/comando.h"
 
-#define SERVER_FIFO "/tmp/controller_fifo"
+#include "filaEscalonamento.h"
+#include "comando.h"
+#include "mensagem.h"
 
-void responder_ao_runner(pid_t pid_cliente, int id_atribuido) {
-    char path[64];
-    snprintf(path, 64, "/tmp/fifo_%d", pid_cliente);
-    
-    int fd_res = open(path, O_WRONLY);
-    if (fd_res != -1) {
-        // Envia o ID para o runner que está à espera
-        write(fd_res, &id_atribuido, sizeof(int));
-        close(fd_res);
+void enviar_mensagem (const char* fifo_runner, const Mensagem *msg){
+
+    int fd_runner = open (fifo_runner, O_WRONLY); 
+
+    if (fd_runner == -1) {
+        perror (" [controller] Erro ao abrir FIFO para escrita");
+        return;
     }
+
+    if (write (fd_runner, msg, sizeof(Mensagem)) == -1) {
+        perror ("[controller] Erro ao escrever a mensagem");
+    }
+
+    close (fd_runner);
 }
 
-// Função auxiliar para escrever no terminal sem printf
-void log_msg(const char *msg) {
-    write(STDOUT_FILENO, msg, strlen(msg));
-}
+void despachar_fila (FilaEscalonamento *fila, int slots_livres) {
 
-int main(int argc, char *argv[]) {
-    // 1. Validar argumentos (ex: ./controller 5 policy1)
-    if (argc < 3) {
-        log_msg("Uso: ./controller <parallel-commands> <sched-policy>\n");
-        return 1;
-    }
-
-    // 2. Criar o Pipe Central
-    unlink(SERVER_FIFO); // Remove se já existir
-    if (mkfifo(SERVER_FIFO, 0666) == -1) {
-        log_msg("Erro ao criar FIFO central\n");
-        return 1;
-    }
-
-    // 3. Abrir o FIFO
-    // Usamos O_RDWR para o controller não receber EOF quando um runner fecha
-    int fd_central = open(SERVER_FIFO, O_RDWR);
-    if (fd_central == -1) {
-        log_msg("Erro ao abrir FIFO central\n");
-        return 1;
-    }
-
-    log_msg("[controller] Pronto para receber pedidos...\n");
-
-    Pedido pedido_recebido;
-    int contador_id = 1;
-
-    // 4. Ciclo de Eventos Principal
-    while (read(fd_central, &pedido_recebido, sizeof(Pedido)) > 0) {
+    while (slots_livres > 0 && !fila_vazia(fila)) {
+        Comando *cmd = fila_pop(fila);
         
-        switch (pedido_recebido.modo) {
-            case EXECUTAR:
-                // Atribuir ID ao comando
-                pedido_recebido.dados.command_id = contador_id++;
-                
-                log_msg("[controller] Novo comando para escalonar.\n");
-                
-                // TODO: inserir na tua FilaEscalonamento (Glib)
-                
-                // NOTA: Para o runner não ficar bloqueado para sempre,
-                // deves responder-lhe confirmando a receção (ver abaixo).
-                break;
+    Mensagem msg;
+    memset(&msg, 0, sizeof(Mensagem));
+    msg.tipo =OK;
+    msg.comando = *cmd;
+    strncpy(msg.runner_FIFO, cmd->runner_FIFO, MAX_FIFO_NAME - 1);
 
-            case CONSULTAR:
-                log_msg("[controller] Pedido de consulta recebido.\n");
-                // TODO: Iterar pela fila e enviar estado ao runner
-                break;
+    enviar_mensagem(cmd->runner_FIFO, &msg);
 
-            case TERMINAR:
-                log_msg("[controller] A encerrar servidor...\n");
-                close(fd_central);
-                unlink(SERVER_FIFO);
-                return 0;
+    libertar_comando(cmd);
+    slots_livres--;
+    }
+}
 
-            default:
-                log_msg("[controller] Pedido inválido recebido.\n");
-                break;
-        }
+void tratar_submit (FilaEscalonamento *fila, Mensagem *msg, int slots_livres) {
+       
+        Comando *cmd = criar_comando(msg->comando.user_id, msg->comando.command_id, msg->comando.command, msg->comando.runner_FIFO);
+
+        cmd->tempo_entrada = msg->comando.tempo_entrada;
+
+        inserir_comando(fila, cmd);
+
+        despachar_fila(fila, slots_livres);
+}
+
+void tratar_executado (FilaEscalonamento *fila, Mensagem *msg, int slots_livres) {
+
+    slots_livres++;
+    despachar_fila(fila, slots_livres);
+}
+
+int main (int argc, char *argv[]) {
+
+    if (argc < 3) {
+        write(1, "Uso: ./controller <parallel-commands> <sched-policy>\n", 38);
+        return 1;
     }
 
-    return 0;
+    int parallel_commands = atoi(argv[1]);
+    if (parallel_commands <= 1) {
+        write(1, "O número de comandos paralelos deve ser >=1\n", 36);
+        return 1;
+    }
+
+    int slots_livres = parallel_commands;
+
+    PoliticaEscalonamento politica = argv[2];
+
+    FilaEscalonamento fila;
+    inicializar_fila(&fila, politica, NULL, 0);
+
+    mkdir ("fifos", 0777);
+
+    if (mkfifo (FIFO_RUNNER_TO_CONTROLLER, 0666) == -1) {
+        perror ("Erro ao criar FIFO para comunicação");
+        return 1;
+    }
+
+    int fd = open (FIFO_RUNNER_TO_CONTROLLER, O_RDWR);
+    if (fd == -1) {
+        perror ("Erro ao abrir FIFO");
+        unlink (FIFO_RUNNER_TO_CONTROLLER);
+        return 1;
+    }
+
+    Mensagem msg;
+    ssize_t bytes_lidos;
+
+    while(1) {
+        bytes_lidos = read (fd, &msg, sizeof(Mensagem));
+        if (bytes_lidos == -1) {
+            perror ("Erro ao ler a mensagem");
+            continue;
+        }
+
+        switch (msg.tipo) {
+            case SUBMIT:
+                tratar_submit(&fila, &msg, slots_livres);
+                break;
+            case EXECUTADO:
+                tratar_executado(&fila, &msg, slots_livres);
+                break;
+            default:
+                write(1, "Tipo de mensagem desconhecido\n", 30);
+        }
+
+        close (fd);
+        unlink (FIFO_RUNNER_TO_CONTROLLER);
+        return 0;
+    }
 }
+
+
+

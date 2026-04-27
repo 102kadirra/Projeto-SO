@@ -12,9 +12,7 @@
 
 void enviar_mensagem (const char* fifo_ControllerToRunner, const Mensagem *msg) {
 
-    const char *fifo_runnerToController = "fifos/runnerToController";
-
-    int fd_controller = open (fifo_runnerToController, O_WRONLY);
+    int fd_controller = open (FIFO_RUNNER_TO_CONTROLLER, O_WRONLY);
     if (fd_controller == -1) {
         perror ("Erro ao abrir FIFO para escrita");
         unlink (fifo_ControllerToRunner);
@@ -25,7 +23,7 @@ void enviar_mensagem (const char* fifo_ControllerToRunner, const Mensagem *msg) 
     if (bytes_escritos == -1) {
         perror ("[runner] Erro ao escrever a mensagem");
         close (fd_controller);
-        unlink (fifo_runnerToController);
+        unlink (fifo_ControllerToRunner);
         exit(1);
     }
 

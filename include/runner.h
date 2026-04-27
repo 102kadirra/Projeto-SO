@@ -5,6 +5,6 @@
 #include "controller.h" 
 
 
-
+#define FIFO_CONTROLLER_TO_RUNNER "fifos/controllerToRunner_%d"
 
 #endif

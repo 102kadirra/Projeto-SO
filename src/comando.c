@@ -1,10 +1,11 @@
 #include "comando.h"
 
-Comando *criar_comando(int user_id, int command_id, const char *command_str, const char *runner_fifo) {
+Comando *criar_comando(int user_id, int command_id, int turno, const char *command_str, const char *runner_fifo) {
     Comando *cmd = malloc(sizeof(Comando));
     if (cmd) {
         cmd->user_id = user_id;
         cmd->command_id = command_id;
+        cmd->turno = turno;
         strncpy(cmd->command, command_str, 255);
         cmd->command[255] = '\0';
         strncpy(cmd->runner_FIFO, runner_fifo, 255);
