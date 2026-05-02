@@ -6,11 +6,13 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <sys/time.h> 
+#include <glib.h>
 #include "filaEscalonamento.h"
 #include "politicas/roundRobin.h"
 #include "politicas/fcfs.h"
 #include "comando.h"
 #include "mensagem.h"
+
 
 void enviar_mensagem (const char* fifo_runner, const Mensagem *msg){
 
@@ -51,42 +53,78 @@ void despachar_fila (FilaEscalonamento *fila, int *slots_livres, Comando *em_exe
     }
 }
 
-// Mantém-se parecido, apenas passamos os arrays extra
-void tratar_submit (FilaEscalonamento *fila, Mensagem *msg, int *slots_livres, Comando *em_execucao, int *num_em_execucao) {
-       
-    Comando *cmd = criar_comando(msg->comando.user_id, msg->comando.command_id, 0, msg->comando.command, msg->comando.runner_FIFO);
+void tratar_submit (FilaEscalonamento *fila, Mensagem *msg, int *slots_livres,
+                    Comando *em_execucao, int *num_em_execucao,
+                    GHashTable *tabela_turnos) {
 
+    int uid = msg->comando.user_id;
+
+    /* lê o contador actual (0 se chave ausente) e incrementa */
+    gpointer valor_atual = g_hash_table_lookup(tabela_turnos,
+                                               GINT_TO_POINTER(uid));
+    int novo_turno = GPOINTER_TO_INT(valor_atual) + 1;
+
+    /* cria o comando com turno já definido */
+    Comando *cmd = criar_comando(uid, msg->comando.command_id,
+                                 novo_turno,
+                                 msg->comando.command,
+                                 msg->comando.runner_FIFO);
     cmd->tempo_entrada = msg->comando.tempo_entrada;
+
+    // persiste o novo contador na hash e insere na fila 
+    g_hash_table_insert(tabela_turnos,
+                        GINT_TO_POINTER(uid),
+                        GINT_TO_POINTER(novo_turno));
 
     inserir_comando(fila, cmd);
 
     despachar_fila(fila, slots_livres, em_execucao, num_em_execucao);
 }
 
-// Histórico Persistente (Regista a duração num ficheiro e remove do Array)
-void tratar_executado (FilaEscalonamento *fila, Mensagem *msg, int *slots_livres, Comando *em_execucao, int *num_em_execucao) {
+
+void tratar_executado (FilaEscalonamento *fila, Mensagem *msg, int *slots_livres,
+                       Comando *em_execucao, int *num_em_execucao,
+                       GHashTable *tabela_turnos) {
 
     struct timeval fim;
     gettimeofday(&fim, NULL);
 
     for (int i = 0; i < *num_em_execucao; i++) {
         if (em_execucao[i].command_id == msg->comando.command_id) {
-            
-            // Calcula a duração total em milissegundos
-            long duracao = (fim.tv_sec - em_execucao[i].tempo_entrada.tv_sec) * 1000 + 
-                           (fim.tv_usec - em_execucao[i].tempo_entrada.tv_usec) / 1000;
-            
-            // PADRÃO DE REGISTO EM FICHEIRO
-            int fd = open("historico.txt", O_CREAT | O_APPEND | O_WRONLY, 0644);
-            if (fd != -1) {
+
+            /* Calcula duração em milissegundos */
+            long duracao = (fim.tv_sec  - em_execucao[i].tempo_entrada.tv_sec)  * 1000L
+                         + (fim.tv_usec - em_execucao[i].tempo_entrada.tv_usec) / 1000L;
+
+            /* Registo em ficheiro (open/write/close)*/
+            int fd_log = open("historico.txt", O_CREAT | O_APPEND | O_WRONLY, 0644);
+            if (fd_log != -1) {
                 char buf[128];
-                int len = snprintf(buf, sizeof(buf), "User: %d | CmdID: %d | Duration: %ld ms\n", 
-                                   em_execucao[i].user_id, em_execucao[i].command_id, duracao);
-                write(fd, buf, len);
-                close(fd);
+                int len = snprintf(buf, sizeof(buf),
+                                   "User: %d | CmdID: %d | Duration: %ld ms\n",
+                                   em_execucao[i].user_id,
+                                   em_execucao[i].command_id,
+                                   duracao);
+                write(fd_log, buf, len);   /* write() único - atómico para PIPE_BUF */
+                close(fd_log);
             }
-            
-            // Remove do array puxando o último para esta posição (O(1))
+
+            /* Decrementa o contador de turnos na tabela_turnos */
+            int uid = em_execucao[i].user_id;
+            gpointer valor_atual = g_hash_table_lookup(tabela_turnos,
+                                                       GINT_TO_POINTER(uid));
+            int novo_count = GPOINTER_TO_INT(valor_atual) - 1;
+
+            if (novo_count <= 0) {
+                /* Remove a chave para não deixar entradas com count ≤ 0 */
+                g_hash_table_remove(tabela_turnos, GINT_TO_POINTER(uid));
+            } else {
+                g_hash_table_insert(tabela_turnos,
+                                    GINT_TO_POINTER(uid),
+                                    GINT_TO_POINTER(novo_count));
+            }
+
+            /* Remove do array em O(1): copia o último para esta posição */
             em_execucao[i] = em_execucao[--(*num_em_execucao)];
             break;
         }
@@ -96,25 +134,45 @@ void tratar_executado (FilaEscalonamento *fila, Mensagem *msg, int *slots_livres
     despachar_fila(fila, slots_livres, em_execucao, num_em_execucao);
 }
 
+static void imprimir_comando_fila(gpointer data, gpointer user_data) {
+    Comando *cmd = (Comando *)data;
+    int fd = GPOINTER_TO_INT(user_data); // Desempacota o descritor de ficheiro
+    char buf[256];
+    
+    // Formatação exigida pelo enunciado: user-id X - command-id Y
+    int len = snprintf(buf, sizeof(buf), "user-id %d - command-id %d\n", 
+                       cmd->user_id, cmd->command_id);
+    write(fd, buf, len);
+}
+
 // Responde ao runner -c
 void tratar_consulta (FilaEscalonamento *fila, Mensagem *msg, Comando *em_execucao, int num_em_execucao) {
     int fd = open(msg->runner_FIFO, O_WRONLY);
     if (fd == -1) return;
     
     char buf[512];
-    int len = snprintf(buf, sizeof(buf), "Executing\n");
+    int len;
+
+    // Secção de Execução
+    len = snprintf(buf, sizeof(buf), "---\nExecuting\n");
     write(fd, buf, len);
     
     for (int i = 0; i < num_em_execucao; i++) {
-        len = snprintf(buf, sizeof(buf), "user-id %d\ncommand-id %d\n", 
+        len = snprintf(buf, sizeof(buf), "user-id %d - command-id %d\n", 
                        em_execucao[i].user_id, em_execucao[i].command_id);
         write(fd, buf, len);
     }
     
-    len = snprintf(buf, sizeof(buf), "Scheduled\n");
+    // Secção de Fila de Espera (Scheduled) 
+    len = snprintf(buf, sizeof(buf), "---\nScheduled\n");
     write(fd, buf, len);
     
-    // Utilizar iteradores da GLib para imprimir a fila de espera ?
+    // Percorre a GQueue da GLib e imprime cada comando usando a função auxiliar
+    // Pasoou se o descritor de ficheiro (fd) como 'user_data'
+    g_queue_foreach(fila->fila, imprimir_comando_fila, GINT_TO_POINTER(fd));
+    
+    len = snprintf(buf, sizeof(buf), "---\n");
+    write(fd, buf, len);
     
     close(fd);
 }
@@ -142,6 +200,10 @@ int main (int argc, char *argv[]) {
 
     FilaEscalonamento fila;
     inicializar_fila(&fila, politica, NULL, 0);
+
+    /* Cria a tabela de turnos por utilizador.
+     * Chaves e valores são inteiros embalados em ponteiro (sem free necessário). */
+    GHashTable *tabela_turnos = g_hash_table_new(g_direct_hash, g_direct_equal);
 
     // Inicialização do Array de comandos em execução
     Comando *em_execucao = malloc(sizeof(Comando) * parallel_commands);
@@ -183,11 +245,13 @@ int main (int argc, char *argv[]) {
                     enviar_mensagem(msg.runner_FIFO, &rej);
                     
                 } else {
-                    tratar_submit(&fila, &msg, &slots_livres, em_execucao, &num_em_execucao);
+                    tratar_submit(&fila, &msg, &slots_livres, em_execucao, &num_em_execucao,
+                                  tabela_turnos);
                 }
                 break;
             case EXECUTADO:
-                tratar_executado(&fila, &msg, &slots_livres, em_execucao, &num_em_execucao);
+                tratar_executado(&fila, &msg, &slots_livres, em_execucao, &num_em_execucao,
+                                 tabela_turnos);
                 break;
             case CONSULTA:
                 tratar_consulta(&fila, &msg, em_execucao, num_em_execucao);
@@ -209,6 +273,7 @@ int main (int argc, char *argv[]) {
     }
 
    
+    g_hash_table_destroy(tabela_turnos);
     free(em_execucao);
     close (fd);
     unlink (FIFO_RUNNER_TO_CONTROLLER);

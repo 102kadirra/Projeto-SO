@@ -48,12 +48,37 @@ Em terminais separados:
 
 **Controller:**
 ```bash
-./bin/controller
+./bin/controller <parallel-commands> <sched-policy>
 ```
 
 **Runner:**
 ```bash
-./bin/runner
+./bin/runner -e <user-id> <command>
+./bin/runner -c
+./bin/runner -s
+```
+
+## Comandos possíveis
+### Controller
+- `./bin/controller <parallel-commands> <sched-policy>`
+	- `<parallel-commands>`: número de comandos em paralelo (>= 1)
+	- `<sched-policy>`: `fcfs` ou `RR`
+
+### Runner
+- `./bin/runner -e <user-id> <command>`
+	- Submete e executa um comando no sistema.
+	- O `<command>` aceita pipes (`|`) e redirecionamentos (`>`, `<`, `2>`).
+- `./bin/runner -c`
+	- Consulta o estado (em execução e agendados).
+- `./bin/runner -s`
+	- Solicita shutdown gracioso do controller.
+
+### Exemplos
+```bash
+./bin/controller 2 fcfs
+./bin/runner -e 1 "ls -l | wc -l"
+./bin/runner -c
+./bin/runner -s
 ```
 
 ## Políticas de escalonamento
