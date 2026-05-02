@@ -1,5 +1,7 @@
 
 #include "filaEscalonamento.h"
+#include "politicas/fcfs.h"
+#include "politicas/roundRobin.h"
 
 void inicializar_fila (FilaEscalonamento *fila, PoliticaEscalonamento politica, ContadorUtilizador contadores[MAX_USERS], int num_users) {
     fila->fila = g_queue_new();
@@ -14,7 +16,7 @@ int obter_e_incrementar_turno (FilaEscalonamento *fila, int user_id) {
     for (int i = 0; i < fila->num_users; i++) {
         if (fila->contadores[i].user_id == user_id) {
             fila->contadores[i].contador++;
-            return;
+            return fila->contadores[i].contador++;
         }
     }
     if (fila->num_users < MAX_USERS) {
@@ -52,3 +54,12 @@ gboolean fila_vazia (FilaEscalonamento *fila) {
     return g_queue_is_empty(fila->fila);
 }
     
+PoliticaEscalonamento selecionar_politica (const char *nome_politica) {
+    if (strcmp(nome_politica, "fcfs") == 0) {
+        return politica_fcfs;
+    } else if (strcmp(nome_politica, "RR") == 0) {
+        return politica_rr;
+    } else {
+        return NULL;
+    }
+}

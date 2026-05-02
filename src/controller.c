@@ -26,9 +26,9 @@ void enviar_mensagem (const char* fifo_runner, const Mensagem *msg){
     close (fd_runner);
 }
 
-void despachar_fila (FilaEscalonamento *fila, int slots_livres) {
+void despachar_fila (FilaEscalonamento *fila, int *slots_livres) {
 
-    while (slots_livres > 0 && !fila_vazia(fila)) {
+    while (*slots_livres > 0 && !fila_vazia(fila)) {
         Comando *cmd = fila_pop(fila);
         
     Mensagem msg;
@@ -40,13 +40,13 @@ void despachar_fila (FilaEscalonamento *fila, int slots_livres) {
     enviar_mensagem(cmd->runner_FIFO, &msg);
 
     libertar_comando(cmd);
-    slots_livres--;
+    (*slots_livres)--;
     }
 }
 
-void tratar_submit (FilaEscalonamento *fila, Mensagem *msg, int slots_livres) {
+void tratar_submit (FilaEscalonamento *fila, Mensagem *msg, int *slots_livres) {
        
-        Comando *cmd = criar_comando(msg->comando.user_id, msg->comando.command_id, msg->comando.command, msg->comando.runner_FIFO);
+        Comando *cmd = criar_comando(msg->comando.user_id, msg->comando.command_id, 0, msg->comando.command, msg->comando.runner_FIFO);
 
         cmd->tempo_entrada = msg->comando.tempo_entrada;
 
@@ -55,9 +55,9 @@ void tratar_submit (FilaEscalonamento *fila, Mensagem *msg, int slots_livres) {
         despachar_fila(fila, slots_livres);
 }
 
-void tratar_executado (FilaEscalonamento *fila, Mensagem *msg, int slots_livres) {
+void tratar_executado (FilaEscalonamento *fila, Mensagem *msg, int *slots_livres) {
 
-    slots_livres++;
+    (*slots_livres)++;
     despachar_fila(fila, slots_livres);
 }
 
@@ -69,20 +69,25 @@ int main (int argc, char *argv[]) {
     }
 
     int parallel_commands = atoi(argv[1]);
-    if (parallel_commands <= 1) {
+    if (parallel_commands < 1) {
         write(1, "O número de comandos paralelos deve ser >=1\n", 36);
         return 1;
     }
 
     int slots_livres = parallel_commands;
 
-    PoliticaEscalonamento politica = argv[2];
+    PoliticaEscalonamento politica = selecionar_politica(argv[2]);
+    if (politica == NULL) {
+        write(1, "Política de escalonamento desconhecida. Use 'fcfs' ou 'RR'.\n", 49);
+        return 1;
+    }
 
     FilaEscalonamento fila;
     inicializar_fila(&fila, politica, NULL, 0);
 
     mkdir ("fifos", 0777);
 
+    unlink (FIFO_RUNNER_TO_CONTROLLER);
     if (mkfifo (FIFO_RUNNER_TO_CONTROLLER, 0666) == -1) {
         perror ("Erro ao criar FIFO para comunicação");
         return 1;
@@ -107,20 +112,21 @@ int main (int argc, char *argv[]) {
 
         switch (msg.tipo) {
             case SUBMIT:
-                tratar_submit(&fila, &msg, slots_livres);
+                tratar_submit(&fila, &msg, &slots_livres);
                 break;
             case EXECUTADO:
-                tratar_executado(&fila, &msg, slots_livres);
+                tratar_executado(&fila, &msg, &slots_livres);
                 break;
             default:
                 write(1, "Tipo de mensagem desconhecido\n", 30);
         }
-
-        close (fd);
-        unlink (FIFO_RUNNER_TO_CONTROLLER);
-        return 0;
     }
+
+    close (fd);
+    unlink (FIFO_RUNNER_TO_CONTROLLER);
+    return 0;    
 }
+
 
 
 

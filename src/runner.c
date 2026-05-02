@@ -39,7 +39,7 @@ void receber_mensagem (const char* fifo_ControllerToRunner, Mensagem *msg) {
         exit(1);
     }
 
-    ssize_t bytes_lidos = read (fd_runner, &msg, sizeof(Mensagem));
+    ssize_t bytes_lidos = read (fd_runner, msg, sizeof(Mensagem));
     if (bytes_lidos == -1) {
         perror ("Erro ao ler a mensagem");
     }
@@ -118,7 +118,7 @@ void modo_executar (int user_id, const char *command) {
     Mensagem resposta;
     receber_mensagem (fifo_ControllerToRunner, &resposta);
 
-    tamanho = snprintf (buffer, sizeof(buffer), "[runner] executing commando %d\n", comando.command_id);
+    tamanho = snprintf (buffer, sizeof(buffer), "[runner] executing command %d\n", comando.command_id);
     write(1, buffer, tamanho);
 
     executar_comando (comando);
@@ -142,19 +142,18 @@ int main (int argc, char *argv[]) {
         write (2, "Uso: ./runner <user-id> <command> | ./runner -c | ./runner -s \n", 68);
         return 1;
     }
-
+    
     if (strcmp (argv[1], "-e") == 0) {
         if (argc < 4) {
             write (2, "Uso: ./runner -e <user-id> <command>\n", 40);
             return 1;
         }
         int user_id = atoi (argv[2]);
-        modo_executar (user_id, argv[3]);
-    }
-    else {
-        write (2, "modo de utilização inválido", 30);
-        return 1;
-    }
-
+            modo_executar (user_id, argv[3]);
+        }
+        else {
+            write (2, "modo de utilização inválido", 30);
+            return 1;
+        }
     return 0;
 }

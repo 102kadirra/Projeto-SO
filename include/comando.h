@@ -14,7 +14,7 @@ typedef struct Comando {
     struct timeval tempo_entrada;
 } Comando;
 
-Comando *criar_comando(int user_id, int command_id, const char *command_str, const char *runner_fifo);
+Comando *criar_comando(int user_id, int command_id, int turno, const char *command, const char *runner_FIFO);
 void libertar_comando(Comando *cmd);
 double duracao_execucao (const Comando *c, struct timeval *fim);
 

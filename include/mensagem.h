@@ -24,5 +24,4 @@ typedef struct Mensagem {
     char runner_FIFO[MAX_FIFO_NAME];
 } Mensagem;
 
-
 #endif

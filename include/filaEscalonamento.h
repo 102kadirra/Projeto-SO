@@ -4,7 +4,8 @@
 #include <glib.h>
 
 #include "comando.h"
-#include "roundRobin.h"
+#include "politicas/roundRobin.h"
+#include "politicas/fcfs.h"
 
 typedef GCompareDataFunc PoliticaEscalonamento;
 
