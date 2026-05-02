@@ -29,6 +29,8 @@ Comando *fila_pop (FilaEscalonamento *fila);
 int tamanho_fila (FilaEscalonamento *fila);
 gboolean fila_vazia (FilaEscalonamento *fila);
 
+PoliticaEscalonamento selecionar_politica(const char *nome);
+
 #endif
 
 

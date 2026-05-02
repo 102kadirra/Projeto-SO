@@ -5,8 +5,10 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-
+#include <sys/time.h> 
 #include "filaEscalonamento.h"
+#include "politicas/roundRobin.h"
+#include "politicas/fcfs.h"
 #include "comando.h"
 #include "mensagem.h"
 
@@ -26,51 +28,107 @@ void enviar_mensagem (const char* fifo_runner, const Mensagem *msg){
     close (fd_runner);
 }
 
-void despachar_fila (FilaEscalonamento *fila, int *slots_livres) {
+// Move o comando da Fila para o Array de 'em execução'
+void despachar_fila (FilaEscalonamento *fila, int *slots_livres, Comando *em_execucao, int *num_em_execucao) {
 
     while (*slots_livres > 0 && !fila_vazia(fila)) {
         Comando *cmd = fila_pop(fila);
         
-    Mensagem msg;
-    memset(&msg, 0, sizeof(Mensagem));
-    msg.tipo =OK;
-    msg.comando = *cmd;
-    strncpy(msg.runner_FIFO, cmd->runner_FIFO, MAX_FIFO_NAME - 1);
+        // Adiciona à lista de Comandos em Execução para o runner -c 
+        em_execucao[*num_em_execucao] = *cmd;
+        (*num_em_execucao)++;
+        
+        Mensagem msg;
+        memset(&msg, 0, sizeof(Mensagem));
+        msg.tipo = OK;
+        msg.comando = *cmd;
+        strncpy(msg.runner_FIFO, cmd->runner_FIFO, MAX_FIFO_NAME - 1);
 
-    enviar_mensagem(cmd->runner_FIFO, &msg);
+        enviar_mensagem(cmd->runner_FIFO, &msg);
 
-    libertar_comando(cmd);
-    (*slots_livres)--;
+        libertar_comando(cmd);
+        (*slots_livres)--;
     }
 }
 
-void tratar_submit (FilaEscalonamento *fila, Mensagem *msg, int *slots_livres) {
+// Mantém-se parecido, apenas passamos os arrays extra
+void tratar_submit (FilaEscalonamento *fila, Mensagem *msg, int *slots_livres, Comando *em_execucao, int *num_em_execucao) {
        
-        Comando *cmd = criar_comando(msg->comando.user_id, msg->comando.command_id, 0, msg->comando.command, msg->comando.runner_FIFO);
+    Comando *cmd = criar_comando(msg->comando.user_id, msg->comando.command_id, 0, msg->comando.command, msg->comando.runner_FIFO);
 
-        cmd->tempo_entrada = msg->comando.tempo_entrada;
+    cmd->tempo_entrada = msg->comando.tempo_entrada;
 
-        inserir_comando(fila, cmd);
+    inserir_comando(fila, cmd);
 
-        despachar_fila(fila, slots_livres);
+    despachar_fila(fila, slots_livres, em_execucao, num_em_execucao);
 }
 
-void tratar_executado (FilaEscalonamento *fila, Mensagem *msg, int *slots_livres) {
+// Histórico Persistente (Regista a duração num ficheiro e remove do Array)
+void tratar_executado (FilaEscalonamento *fila, Mensagem *msg, int *slots_livres, Comando *em_execucao, int *num_em_execucao) {
+
+    struct timeval fim;
+    gettimeofday(&fim, NULL);
+
+    for (int i = 0; i < *num_em_execucao; i++) {
+        if (em_execucao[i].command_id == msg->comando.command_id) {
+            
+            // Calcula a duração total em milissegundos
+            long duracao = (fim.tv_sec - em_execucao[i].tempo_entrada.tv_sec) * 1000 + 
+                           (fim.tv_usec - em_execucao[i].tempo_entrada.tv_usec) / 1000;
+            
+            // PADRÃO DE REGISTO EM FICHEIRO
+            int fd = open("historico.txt", O_CREAT | O_APPEND | O_WRONLY, 0644);
+            if (fd != -1) {
+                char buf[128];
+                int len = snprintf(buf, sizeof(buf), "User: %d | CmdID: %d | Duration: %ld ms\n", 
+                                   em_execucao[i].user_id, em_execucao[i].command_id, duracao);
+                write(fd, buf, len);
+                close(fd);
+            }
+            
+            // Remove do array puxando o último para esta posição (O(1))
+            em_execucao[i] = em_execucao[--(*num_em_execucao)];
+            break;
+        }
+    }
 
     (*slots_livres)++;
-    despachar_fila(fila, slots_livres);
+    despachar_fila(fila, slots_livres, em_execucao, num_em_execucao);
+}
+
+// Responde ao runner -c
+void tratar_consulta (FilaEscalonamento *fila, Mensagem *msg, Comando *em_execucao, int num_em_execucao) {
+    int fd = open(msg->runner_FIFO, O_WRONLY);
+    if (fd == -1) return;
+    
+    char buf[512];
+    int len = snprintf(buf, sizeof(buf), "Executing\n");
+    write(fd, buf, len);
+    
+    for (int i = 0; i < num_em_execucao; i++) {
+        len = snprintf(buf, sizeof(buf), "user-id %d\ncommand-id %d\n", 
+                       em_execucao[i].user_id, em_execucao[i].command_id);
+        write(fd, buf, len);
+    }
+    
+    len = snprintf(buf, sizeof(buf), "Scheduled\n");
+    write(fd, buf, len);
+    
+    // Utilizar iteradores da GLib para imprimir a fila de espera ?
+    
+    close(fd);
 }
 
 int main (int argc, char *argv[]) {
 
     if (argc < 3) {
-        write(1, "Uso: ./controller <parallel-commands> <sched-policy>\n", 38);
+        write(1, "Uso: ./controller <parallel-commands> <sched-policy>\n", 38); 
         return 1;
     }
 
     int parallel_commands = atoi(argv[1]);
     if (parallel_commands < 1) {
-        write(1, "O número de comandos paralelos deve ser >=1\n", 36);
+        write(1, "O número de comandos paralelos deve ser >=1\n", 36); 
         return 1;
     }
 
@@ -78,12 +136,16 @@ int main (int argc, char *argv[]) {
 
     PoliticaEscalonamento politica = selecionar_politica(argv[2]);
     if (politica == NULL) {
-        write(1, "Política de escalonamento desconhecida. Use 'fcfs' ou 'RR'.\n", 49);
+        write(1, "Política de escalonamento desconhecida. Use 'fcfs' ou 'RR'.\n", 49); 
         return 1;
     }
 
     FilaEscalonamento fila;
     inicializar_fila(&fila, politica, NULL, 0);
+
+    // Inicialização do Array de comandos em execução
+    Comando *em_execucao = malloc(sizeof(Comando) * parallel_commands);
+    int num_em_execucao = 0;
 
     mkdir ("fifos", 0777);
 
@@ -102,31 +164,53 @@ int main (int argc, char *argv[]) {
 
     Mensagem msg;
     ssize_t bytes_lidos;
+    
+    int em_encerramento = 0; 
 
     while(1) {
         bytes_lidos = read (fd, &msg, sizeof(Mensagem));
-        if (bytes_lidos == -1) {
-            perror ("Erro ao ler a mensagem");
-            continue;
-        }
+        if (bytes_lidos <= 0) continue;
 
         switch (msg.tipo) {
             case SUBMIT:
-                tratar_submit(&fila, &msg, &slots_livres);
+                if (em_encerramento) {
+                    write(1, "[controller] Pedido rejeitado: Sistema em encerramento.\n", 56);
+                    
+                    // Criar e enviar mensagem de rejeição
+                    Mensagem rej;
+                    memset(&rej, 0, sizeof(Mensagem));
+                    rej.tipo = REJEITADO;
+                    enviar_mensagem(msg.runner_FIFO, &rej);
+                    
+                } else {
+                    tratar_submit(&fila, &msg, &slots_livres, em_execucao, &num_em_execucao);
+                }
                 break;
             case EXECUTADO:
-                tratar_executado(&fila, &msg, &slots_livres);
+                tratar_executado(&fila, &msg, &slots_livres, em_execucao, &num_em_execucao);
+                break;
+            case CONSULTA:
+                tratar_consulta(&fila, &msg, em_execucao, num_em_execucao);
+                break;
+            case SHUTDOWN:
+                write(1, "[controller] Shutdown iniciado. A aguardar fim dos processos...\n", 64);
+                em_encerramento = 1;
                 break;
             default:
                 write(1, "Tipo de mensagem desconhecido\n", 30);
         }
+
+       
+        // Se pediu para encerrar E já não há ninguém a correr E a fila está vazia -> Sai do loop
+        if (em_encerramento == 1 && num_em_execucao == 0 && fila_vazia(&fila)) {
+            write(1, "[controller] Todos os processos terminaram. A encerrar.\n", 56);
+            break; 
+        }
     }
 
+   
+    free(em_execucao);
     close (fd);
     unlink (FIFO_RUNNER_TO_CONTROLLER);
     return 0;    
 }
-
-
-
-

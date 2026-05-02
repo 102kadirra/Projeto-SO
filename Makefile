@@ -3,7 +3,7 @@ CFLAGS  = -Wall -g -Iinclude $(shell pkg-config --cflags glib-2.0)
 GLIB    = $(shell pkg-config --libs glib-2.0)
 
 CONTROLLER_OBJS = obj/controller.o obj/comando.o obj/filaEscalonamento.o \
-                  obj/mensagem.o obj/registo.o \
+                  obj/mensagem.o \
                   obj/fcfs.o obj/roundRobin.o
 RUNNER_OBJS     = obj/runner.o obj/comando.o obj/mensagem.o
 
@@ -42,10 +42,6 @@ obj/mensagem.o: src/mensagem.c \
 
 obj/comando.o: src/comando.c \
                include/comando.h
-	$(CC) $(CFLAGS) -c $< -o $@
-
-obj/registo.o: src/registo.c \
-               include/registo.h include/comando.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 obj/fcfs.o: src/politicas/fcfs.c \
