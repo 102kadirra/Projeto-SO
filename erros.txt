@@ -1,1 +1,0 @@
-ls: impossível aceder a 'Senhor_Engenheiro_Kadirra': Ficheiro ou pasta inexistente
