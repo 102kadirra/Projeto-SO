@@ -12,15 +12,8 @@ typedef GCompareDataFunc PoliticaEscalonamento;
 #define MAX_USERS 256
 
 typedef struct {
-    int user_id;
-    int contador;
-} ContadorUtilizador;
-
-typedef struct {
     GQueue* fila;
     PoliticaEscalonamento politica;
-    // ContadorUtilizador contadores[MAX_USERS];
-    // int num_users;
 } FilaEscalonamento;
 
 void inicializar_fila (FilaEscalonamento *fila, PoliticaEscalonamento politica);
