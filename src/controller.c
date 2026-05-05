@@ -139,7 +139,7 @@ static void imprimir_comando_fila(gpointer data, gpointer user_data) {
     int fd = GPOINTER_TO_INT(user_data); // Desempacota o descritor de ficheiro
     char buf[256];
     
-    // Formatação exigida pelo enunciado: user-id X - command-id Y
+   
     int len = snprintf(buf, sizeof(buf), "user-id %d - command-id %d\n", 
                        cmd->user_id, cmd->command_id);
     write(fd, buf, len);
@@ -199,10 +199,11 @@ int main (int argc, char *argv[]) {
     }
 
     FilaEscalonamento fila;
-    inicializar_fila(&fila, politica, NULL, 0);
+    inicializar_fila(&fila, politica);
 
-    /* Cria a tabela de turnos por utilizador.
-     * Chaves e valores são inteiros embalados em ponteiro (sem free necessário). */
+    /* 
+     Cria a tabela de turnos por utilizador.
+     */
     GHashTable *tabela_turnos = g_hash_table_new(g_direct_hash, g_direct_equal);
 
     // Inicialização do Array de comandos em execução

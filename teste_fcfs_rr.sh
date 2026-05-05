@@ -168,4 +168,4 @@ if [[ -n "$TEMPO_USER2_FCFS" && -n "$TEMPO_USER2_RR" ]]; then
 fi
 
 echo ""
-info "Teste de justiça concluído com sucesso!"
+info "Teste de comparação de políticas concluído com sucesso!"

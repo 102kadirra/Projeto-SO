@@ -19,11 +19,11 @@ typedef struct {
 typedef struct {
     GQueue* fila;
     PoliticaEscalonamento politica;
-    ContadorUtilizador contadores[MAX_USERS];
-    int num_users;
+    // ContadorUtilizador contadores[MAX_USERS];
+    // int num_users;
 } FilaEscalonamento;
 
-void inicializar_fila (FilaEscalonamento *fila, PoliticaEscalonamento politica, ContadorUtilizador contadores[MAX_USERS], int num_users);
+void inicializar_fila (FilaEscalonamento *fila, PoliticaEscalonamento politica);
 void inserir_comando (FilaEscalonamento *fila, Comando *cmd);
 Comando *fila_pop (FilaEscalonamento *fila);
 int tamanho_fila (FilaEscalonamento *fila);
